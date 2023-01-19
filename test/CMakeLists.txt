@@ -16,7 +16,7 @@ target_include_directories(doctest SYSTEM INTERFACE ${DOCTEST_INCLUDE_DIRS})
 add_subdirectory(install)
 set_target_warnings(test-sfml-install)
 
-add_library(sfml-test-main STATIC
+add_library(sfml-test-main OBJECT
     TestUtilities/SystemUtil.hpp
     TestUtilities/SystemUtil.cpp
     TestUtilities/WindowUtil.hpp
