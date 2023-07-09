@@ -32,6 +32,7 @@
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Sleep.hpp>
 
+#include <chrono>
 #include <ostream>
 
 #include <cassert>
@@ -305,7 +306,11 @@ void SoundRecorder::record()
         processCapturedSamples();
 
         // Don't bother the CPU while waiting for more captured data
-        sleep(m_processingInterval);
+        std::unique_lock lock(m_threadMutex);
+        if (m_isCapturingCv.wait_for(lock,
+                                     std::chrono::microseconds(m_processingInterval.asMicroseconds()),
+                                     [this] { return !m_isCapturing; }))
+            break;
     }
 
     // Capture is finished: clean up everything
@@ -375,6 +380,7 @@ void SoundRecorder::awaitCapturingThread()
         std::scoped_lock lock(m_threadMutex);
         m_isCapturing = false;
     }
+    m_isCapturingCv.notify_one();
 
     if (m_thread.joinable())
         m_thread.join();

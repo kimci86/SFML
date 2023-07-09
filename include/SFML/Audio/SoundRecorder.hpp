@@ -33,6 +33,7 @@
 
 #include <SFML/System/Time.hpp>
 
+#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -303,9 +304,10 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    std::thread               m_thread;                   //!< Thread running the background recording task
-    std::mutex                m_threadMutex;              //!< Mutex to protect m_isCapturing from concurrent access
-    bool                      m_isCapturing{};            //!< Capturing state
+    std::thread m_thread;        //!< Thread running the background recording task
+    std::mutex  m_threadMutex;   //!< Mutex to protect m_isCapturing from concurrent access
+    bool        m_isCapturing{}; //!< Capturing state
+    std::condition_variable m_isCapturingCv; //!< Condition variable to notify the capturing thread when m_isCapturing is set to false
     std::vector<std::int16_t> m_samples;                  //!< Buffer to store captured samples
     unsigned int              m_sampleRate{};             //!< Sample rate
     Time         m_processingInterval{milliseconds(100)}; //!< Time period between calls to onProcessSamples
