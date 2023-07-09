@@ -32,6 +32,7 @@
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Sleep.hpp>
 
+#include <chrono>
 #include <mutex>
 #include <ostream>
 
@@ -72,6 +73,7 @@ void SoundStream::initialize(unsigned int channelCount, unsigned int sampleRate)
         const std::lock_guard lock(m_threadMutex);
         m_isStreaming = false;
     }
+    m_isStreamingCv.notify_one();
 
     // Deduce the format from the number of channels
     m_format = priv::AudioDevice::getFormatFromChannelCount(channelCount);
@@ -389,8 +391,11 @@ void SoundStream::streamData()
         }
 
         // Leave some time for the other threads if the stream is still playing
-        if (SoundSource::getStatus() != Stopped)
-            sleep(m_processingInterval);
+        std::unique_lock lock(m_threadMutex);
+        if (m_isStreamingCv.wait_for(lock,
+                                     std::chrono::microseconds(m_processingInterval.asMicroseconds()),
+                                     [this] { return !m_isStreaming; }))
+            break;
     }
 
     // Stop the playback
@@ -521,6 +526,7 @@ void SoundStream::awaitStreamingThread()
         const std::lock_guard lock(m_threadMutex);
         m_isStreaming = false;
     }
+    m_isStreamingCv.notify_one();
 
     if (m_thread.joinable())
         m_thread.join();
