@@ -33,6 +33,7 @@
 
 #include <SFML/System/Time.hpp>
 
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -303,10 +304,11 @@ private:
     // Member data
     ////////////////////////////////////////////////////////////
     std::thread               m_thread;                   //!< Thread running the background recording task
+    std::mutex                m_threadMutex;              //!< Mutex to protect m_isCapturing from concurrent access
+    bool                      m_isCapturing{};            //!< Capturing state
     std::vector<std::int16_t> m_samples;                  //!< Buffer to store captured samples
     unsigned int              m_sampleRate{};             //!< Sample rate
     Time         m_processingInterval{milliseconds(100)}; //!< Time period between calls to onProcessSamples
-    bool         m_isCapturing{};                         //!< Capturing state
     std::string  m_deviceName{getDefaultDevice()};        //!< Name of the audio capture device
     unsigned int m_channelCount{1};                       //!< Number of recording channels
 };

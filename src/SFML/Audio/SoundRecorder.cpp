@@ -126,13 +126,17 @@ bool SoundRecorder::start(unsigned int sampleRate)
 void SoundRecorder::stop()
 {
     // Stop the capturing thread if there is one
-    if (m_isCapturing)
     {
-        awaitCapturingThread();
+        std::scoped_lock lock(m_threadMutex);
 
-        // Notify derived class
-        onStop();
+        if (!m_isCapturing)
+            return;
     }
+
+    awaitCapturingThread();
+
+    // Notify derived class
+    onStop();
 }
 
 
@@ -178,7 +182,14 @@ bool SoundRecorder::setDevice(const std::string& name)
     else
         m_deviceName = name;
 
-    if (m_isCapturing)
+    bool isCapturing = false;
+
+    {
+        std::scoped_lock lock(m_threadMutex);
+        isCapturing = m_isCapturing;
+    }
+
+    if (isCapturing)
     {
         // Stop the capturing thread
         awaitCapturingThread();
@@ -218,7 +229,14 @@ const std::string& SoundRecorder::getDevice() const
 ////////////////////////////////////////////////////////////
 void SoundRecorder::setChannelCount(unsigned int channelCount)
 {
-    if (m_isCapturing)
+    bool isCapturing = false;
+
+    {
+        std::scoped_lock lock(m_threadMutex);
+        isCapturing = m_isCapturing;
+    }
+
+    if (isCapturing)
     {
         err() << "It's not possible to change the channels while recording." << std::endl;
         return;
@@ -275,8 +293,14 @@ void SoundRecorder::onStop()
 ////////////////////////////////////////////////////////////
 void SoundRecorder::record()
 {
-    while (m_isCapturing)
+    for (;;)
     {
+        {
+            std::scoped_lock lock(m_threadMutex);
+            if (!m_isCapturing)
+                break;
+        }
+
         // Process available samples
         processCapturedSamples();
 
@@ -306,7 +330,10 @@ void SoundRecorder::processCapturedSamples()
         if (!onProcessSamples(m_samples.data(), m_samples.size()))
         {
             // The user wants to stop the capture
-            m_isCapturing = false;
+            {
+                std::scoped_lock lock(m_threadMutex);
+                m_isCapturing = false;
+            }
         }
     }
 }
@@ -330,7 +357,10 @@ void SoundRecorder::cleanup()
 ////////////////////////////////////////////////////////////
 void SoundRecorder::launchCapturingThread()
 {
-    m_isCapturing = true;
+    {
+        std::scoped_lock lock(m_threadMutex);
+        m_isCapturing = true;
+    }
 
     assert(!m_thread.joinable() && "Capture thread is already running");
     m_thread = std::thread(&SoundRecorder::record, this);
@@ -340,7 +370,11 @@ void SoundRecorder::launchCapturingThread()
 ////////////////////////////////////////////////////////////
 void SoundRecorder::awaitCapturingThread()
 {
-    m_isCapturing = false;
+    // Request the thread to join
+    {
+        std::scoped_lock lock(m_threadMutex);
+        m_isCapturing = false;
+    }
 
     if (m_thread.joinable())
         m_thread.join();
