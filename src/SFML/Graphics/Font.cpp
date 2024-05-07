@@ -549,6 +549,10 @@ Glyph Font::loadGlyph(std::uint32_t codePoint, unsigned int characterSize, bool 
     glyph.lsbDelta = static_cast<int>(face->glyph->lsb_delta);
     glyph.rsbDelta = static_cast<int>(face->glyph->rsb_delta);
 
+    // Compute the glyph's bounding box
+    glyph.bounds.position = Vector2f(Vector2i(bitmapGlyph->left, -bitmapGlyph->top));
+    glyph.bounds.size     = Vector2f(Vector2u(bitmap.width, bitmap.rows));
+
     Vector2u size(bitmap.width, bitmap.rows);
 
     if ((size.x > 0) && (size.y > 0))
@@ -564,65 +568,64 @@ Glyph Font::loadGlyph(std::uint32_t codePoint, unsigned int characterSize, bool 
 
         // Find a good position for the new glyph into the texture
         glyph.textureRect = findGlyphRect(page, size);
-
-        // Make sure the texture data is positioned in the center
-        // of the allocated texture rectangle
-        glyph.textureRect.position += Vector2i(padding, padding);
-        glyph.textureRect.size -= 2 * Vector2i(padding, padding);
-
-        // Compute the glyph's bounding box
-        glyph.bounds.position = Vector2f(Vector2i(bitmapGlyph->left, -bitmapGlyph->top));
-        glyph.bounds.size     = Vector2f(Vector2u(bitmap.width, bitmap.rows));
-
-        // Resize the pixel buffer to the new size and fill it with transparent white pixels
-        m_pixelBuffer.resize(static_cast<std::size_t>(size.x) * static_cast<std::size_t>(size.y) * 4);
-
-        std::uint8_t* current = m_pixelBuffer.data();
-        std::uint8_t* end     = current + size.x * size.y * 4;
-
-        while (current != end)
+        if (glyph.textureRect.size == Vector2i(size))
         {
-            (*current++) = 255;
-            (*current++) = 255;
-            (*current++) = 255;
-            (*current++) = 0;
-        }
+            // Make sure the texture data is positioned in the center
+            // of the allocated texture rectangle
+            glyph.textureRect.position += Vector2i(padding, padding);
+            glyph.textureRect.size -= 2 * Vector2i(padding, padding);
 
-        // Extract the glyph's pixels from the bitmap
-        const std::uint8_t* pixels = bitmap.buffer;
-        if (bitmap.pixel_mode == FT_PIXEL_MODE_MONO)
-        {
-            // Pixels are 1 bit monochrome values
-            for (unsigned int y = padding; y < size.y - padding; ++y)
+            // Resize the pixel buffer to the new size and fill it with transparent white pixels
+            m_pixelBuffer.resize(static_cast<std::size_t>(size.x) * static_cast<std::size_t>(size.y) * 4);
+
+            std::uint8_t* current = m_pixelBuffer.data();
+            std::uint8_t* end     = current + size.x * size.y * 4;
+
+            while (current != end)
             {
-                for (unsigned int x = padding; x < size.x - padding; ++x)
-                {
-                    // The color channels remain white, just fill the alpha channel
-                    const std::size_t index = x + y * size.x;
-                    m_pixelBuffer[index * 4 + 3] = ((pixels[(x - padding) / 8]) & (1 << (7 - ((x - padding) % 8)))) ? 255 : 0;
-                }
-                pixels += bitmap.pitch;
+                (*current++) = 255;
+                (*current++) = 255;
+                (*current++) = 255;
+                (*current++) = 0;
             }
-        }
-        else
-        {
-            // Pixels are 8 bits gray levels
-            for (unsigned int y = padding; y < size.y - padding; ++y)
-            {
-                for (unsigned int x = padding; x < size.x - padding; ++x)
-                {
-                    // The color channels remain white, just fill the alpha channel
-                    const std::size_t index      = x + y * size.x;
-                    m_pixelBuffer[index * 4 + 3] = pixels[x - padding];
-                }
-                pixels += bitmap.pitch;
-            }
-        }
 
-        // Write the pixels to the texture
-        const auto dest       = Vector2u(glyph.textureRect.position) - Vector2u(padding, padding);
-        const auto updateSize = Vector2u(glyph.textureRect.size) + 2u * Vector2u(padding, padding);
-        page.texture.update(m_pixelBuffer.data(), updateSize, dest);
+            // Extract the glyph's pixels from the bitmap
+            const std::uint8_t* pixels = bitmap.buffer;
+            if (bitmap.pixel_mode == FT_PIXEL_MODE_MONO)
+            {
+                // Pixels are 1 bit monochrome values
+                for (unsigned int y = padding; y < size.y - padding; ++y)
+                {
+                    for (unsigned int x = padding; x < size.x - padding; ++x)
+                    {
+                        // The color channels remain white, just fill the alpha channel
+                        const std::size_t index      = x + y * size.x;
+                        m_pixelBuffer[index * 4 + 3] = ((pixels[(x - padding) / 8]) & (1 << (7 - ((x - padding) % 8))))
+                                                           ? 255
+                                                           : 0;
+                    }
+                    pixels += bitmap.pitch;
+                }
+            }
+            else
+            {
+                // Pixels are 8 bits gray levels
+                for (unsigned int y = padding; y < size.y - padding; ++y)
+                {
+                    for (unsigned int x = padding; x < size.x - padding; ++x)
+                    {
+                        // The color channels remain white, just fill the alpha channel
+                        const std::size_t index      = x + y * size.x;
+                        m_pixelBuffer[index * 4 + 3] = pixels[x - padding];
+                    }
+                    pixels += bitmap.pitch;
+                }
+            }
+
+            // Write the pixels to the texture
+            const auto dest = Vector2u(glyph.textureRect.position) - Vector2u(padding, padding);
+            page.texture.update(m_pixelBuffer.data(), size, dest);
+        }
     }
 
     // Delete the FT glyph
@@ -675,7 +678,7 @@ IntRect Font::findGlyphRect(Page& page, const Vector2u& size) const
                 if (!newTexture)
                 {
                     err() << "Failed to create new page texture" << std::endl;
-                    return {{0, 0}, {2, 2}};
+                    return {{0, 0}, {0, 0}};
                 }
 
                 newTexture->setSmooth(m_isSmooth);
@@ -687,7 +690,7 @@ IntRect Font::findGlyphRect(Page& page, const Vector2u& size) const
                 // Oops, we've reached the maximum texture size...
                 err() << "Failed to add a new character to the font: the maximum texture size has been reached"
                       << std::endl;
-                return {{0, 0}, {2, 2}};
+                return {{0, 0}, {0, 0}};
             }
         }
 
